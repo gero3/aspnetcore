@@ -122,7 +122,7 @@ public class EndToEndBenchmarks
         await destination.FlushAsync(cancellationToken);
     }
 
-    [Benchmark, BenchmarkCategory("Write_OutputCacheStream")]
+    [Benchmark(Description = "StreamSync"), BenchmarkCategory("Write", "Stream")]
     public async Task OCS_StreamSync()
     {
         ReadOnlySequence<byte> body;
@@ -138,7 +138,7 @@ public class EndToEndBenchmarks
         entry.Dispose();
     }
 
-    [Benchmark, BenchmarkCategory("Write_OutputCacheStream")]
+    [Benchmark(Description = "StreamAsync"), BenchmarkCategory("Write", "Stream")]
     public async Task OCS_StreamAsync()
     {
         ReadOnlySequence<byte> body;
@@ -154,7 +154,7 @@ public class EndToEndBenchmarks
         entry.Dispose();
     }
 
-    [Benchmark, BenchmarkCategory("Write_OutputCacheStream")]
+    [Benchmark(Description = "BodyWriter"), BenchmarkCategory("Write", "Stream")]
     public async Task OCS_WriterAsync()
     {
         ReadOnlySequence<byte> body;
@@ -171,7 +171,7 @@ public class EndToEndBenchmarks
         entry.Dispose();
     }
 
-    [Benchmark, BenchmarkCategory("Write_OutputCachePipeWriter")]
+    [Benchmark(Description = "StreamSync"), BenchmarkCategory("Write", "Pipe")]
     public async Task OCPW_StreamSync()
     {
         ReadOnlySequence<byte> body;
@@ -188,7 +188,7 @@ public class EndToEndBenchmarks
         entry.Dispose();
     }
 
-    [Benchmark, BenchmarkCategory("Write_OutputCachePipeWriter")]
+    [Benchmark(Description = "StreamAsync"), BenchmarkCategory("Write", "Pipe")]
     public async Task OCPW_StreamAsync()
     {
         ReadOnlySequence<byte> body;
@@ -205,7 +205,7 @@ public class EndToEndBenchmarks
         entry.Dispose();
     }
 
-    [Benchmark, BenchmarkCategory("Write_OutputCachePipeWriter")]
+    [Benchmark(Description = "BodyWriter"), BenchmarkCategory("Write", "Pipe")]
     public async Task OCPW_WriterAsync()
     {
         ReadOnlySequence<byte> body;
