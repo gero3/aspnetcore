@@ -120,7 +120,6 @@ public class OutputCacheMiddlewareTests
         context.HttpContext.Request.Headers.IfNoneMatch = "*";
         middleware.TryGetRequestPolicies(context.HttpContext, out var policies);
 
-
         using (var entry = new OutputCacheEntry(DateTimeOffset.UtcNow, StatusCodes.Status200OK))
         {
             await OutputCacheEntryFormatter.StoreAsync("BaseKey",
