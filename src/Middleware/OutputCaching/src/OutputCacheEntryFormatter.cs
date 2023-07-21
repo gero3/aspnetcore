@@ -2,10 +2,14 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Buffers;
+using System.Collections.Frozen;
+using System.Diagnostics;
 using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
-using Microsoft.AspNetCore.OutputCaching.Serialization;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 
 namespace Microsoft.AspNetCore.OutputCaching;
 /// <summary>
@@ -13,7 +17,11 @@ namespace Microsoft.AspNetCore.OutputCaching;
 /// </summary>
 internal static class OutputCacheEntryFormatter
 {
-    private const byte SerializationRevision = 1;
+    private enum SerializationRevision
+    {
+        V1_Original = 1,
+        V2_OriginalWithCommonHeaders = 2,
+    }
 
     public static async ValueTask<OutputCacheEntry?> GetAsync(string key, IOutputCacheStore store, CancellationToken cancellationToken)
     {
@@ -21,36 +29,12 @@ internal static class OutputCacheEntryFormatter
 
         var content = await store.GetAsync(key, cancellationToken);
 
-        if (content == null)
+        if (content is null)
         {
             return null;
         }
 
-        var formatter = Deserialize(new MemoryStream(content));
-
-        if (formatter == null)
-        {
-            return null;
-        }
-
-        var outputCacheEntry = new OutputCacheEntry
-        {
-            StatusCode = formatter.StatusCode,
-            Created = formatter.Created,
-            Tags = formatter.Tags,
-            Headers = new(),
-            Body = new CachedResponseBody(formatter.Body, formatter.Body.Sum(x => x.Length))
-        };
-
-        if (formatter.Headers != null)
-        {
-            foreach (var header in formatter.Headers)
-            {
-                outputCacheEntry.Headers.TryAdd(header.Key, header.Value);
-            }
-        }
-
-        return outputCacheEntry;
+        return Deserialize(content);
     }
 
     public static async ValueTask StoreAsync(string key, OutputCacheEntry value, TimeSpan duration, IOutputCacheStore store, ILogger logger, CancellationToken cancellationToken)
@@ -59,26 +43,9 @@ internal static class OutputCacheEntryFormatter
         ArgumentNullException.ThrowIfNull(value.Body);
         ArgumentNullException.ThrowIfNull(value.Headers);
 
-        var formatterEntry = new FormatterEntry
-        {
-            StatusCode = value.StatusCode,
-            Created = value.Created,
-            Tags = value.Tags,
-            Body = value.Body.Segments
-        };
-
-        if (value.Headers != null)
-        {
-            formatterEntry.Headers = new();
-            foreach (var header in value.Headers)
-            {
-                formatterEntry.Headers.TryAdd(header.Key, header.Value.ToArray());
-            }
-        }
-
         using var bufferStream = new MemoryStream();
 
-        Serialize(bufferStream, formatterEntry);
+        Serialize(bufferStream, value);
 
         if (!bufferStream.TryGetBuffer(out var segment))
         {
@@ -95,7 +62,7 @@ internal static class OutputCacheEntryFormatter
             else
             {
                 // legacy API/in-proc: create an isolated right-sized byte[] for the payload
-                await store.SetAsync(key, payload.ToArray(), value.Tags, duration, cancellationToken);
+                await store.SetAsync(key, payload.ToArray(), AsArray(value.Tags), duration, cancellationToken);
             }
         }
         catch (OperationCanceledException)
@@ -105,6 +72,22 @@ internal static class OutputCacheEntryFormatter
         catch (Exception ex)
         {
             logger.UnableToWriteToOutputCache(ex);
+        }
+
+        static string[] AsArray(ReadOnlyMemory<string> value)
+        {
+            // empty
+            if (value.IsEmpty)
+            {
+                return Array.Empty<string>();
+            }
+            // simple "all of an array"? use that array as-is
+            if (MemoryMarshal.TryGetArray(value, out var segment) && segment.Offset == 0 && segment.Count == segment.Array?.Length)
+            {
+                return segment.Array;
+            }
+            // create a right-size copy
+            return value.ToArray();
         }
     }
 
@@ -136,13 +119,13 @@ internal static class OutputCacheEntryFormatter
     //     data byte length: 7-bit encoded int
     //     UTF-8 encoded byte[]
 
-    private static void Serialize(Stream output, FormatterEntry entry)
+    private static void Serialize(Stream output, OutputCacheEntry entry)
     {
         using var writer = new BinaryWriter(output);
 
         // Serialization revision:
         //   7-bit encoded int
-        writer.Write7BitEncodedInt(SerializationRevision);
+        writer.Write7BitEncodedInt((int)SerializationRevision.V2_OriginalWithCommonHeaders);
 
         // Creation date:
         //   Ticks: 7-bit encoded long
@@ -158,35 +141,26 @@ internal static class OutputCacheEntryFormatter
         // Headers:
         //   Headers count: 7-bit encoded int
 
-        writer.Write7BitEncodedInt(entry.Headers.Count);
+        writer.Write7BitEncodedInt(entry.Headers.Length);
 
         //   For each header:
         //     key name byte length: 7-bit encoded int
         //     UTF-8 encoded key name byte[]
 
-        foreach (var header in entry.Headers)
+        foreach (var header in entry.Headers.Span)
         {
-            writer.Write(header.Key);
+            WriteCommonHeader(writer, header.Name);
 
             //     Values count: 7-bit encoded int
-
-            if (header.Value == null)
-            {
-                writer.Write7BitEncodedInt(0);
-                continue;
-            }
-            else
-            {
-                writer.Write7BitEncodedInt(header.Value.Length);
-            }
+            var count = header.Value.Count;
+            writer.Write7BitEncodedInt(count);
 
             //     For each header value:
             //       data byte length: 7-bit encoded int
             //       UTF-8 encoded byte[]
-
-            foreach (var value in header.Value)
+            for (int i = 0; i < count; i++)
             {
-                writer.Write(value ?? "");
+                WriteCommonHeader(writer, header.Value[i]);
             }
         }
 
@@ -196,12 +170,12 @@ internal static class OutputCacheEntryFormatter
         //     data byte length: 7-bit encoded int
         //     data byte[]
 
-        writer.Write7BitEncodedInt(entry.Body.Count);
+        writer.Write7BitEncodedInt(checked((int)entry.Body.Length));
 
         foreach (var segment in entry.Body)
         {
             writer.Write7BitEncodedInt(segment.Length);
-            writer.Write(segment);
+            writer.BaseStream.Write(segment.Span); // note BaseStream ensures flush etc in anticipation
         }
 
         // Tags:
@@ -212,29 +186,73 @@ internal static class OutputCacheEntryFormatter
 
         writer.Write7BitEncodedInt(entry.Tags.Length);
 
-        foreach (var tag in entry.Tags)
+        foreach (var tag in entry.Tags.Span)
         {
             writer.Write(tag ?? "");
         }
     }
 
-    private static FormatterEntry? Deserialize(Stream content)
+    [SkipLocalsInit]
+    static void WriteCommonHeader(BinaryWriter writer, string? value)
     {
-        using var reader = new BinaryReader(content);
+        if (string.IsNullOrEmpty(value))
+        {
+            writer.Write7BitEncodedInt(0);
+        }
+        else
+        {
+            if (CommonHeadersLookup.TryGetValue(value, out int known))
+            {
+                writer.Write7BitEncodedInt((known << 1) | 1);
+            }
+            else
+            {
+                var bytes = Encoding.UTF8.GetByteCount(value);
+                writer.Write7BitEncodedInt(bytes << 1);
+
+                const int MAX_STACK_BYTES = 256;
+                byte[]? leased = null;
+
+                Span<byte> buffer = bytes <= MAX_STACK_BYTES ? stackalloc byte[bytes] : new(leased = ArrayPool<byte>.Shared.Rent(bytes), 0, bytes);
+                int actual = Encoding.UTF8.GetBytes(value, buffer);
+                Debug.Assert(actual == bytes);
+                writer.BaseStream.Write(buffer); // .BaseStream includes a flush in anticipation
+                if (leased is not null)
+                {
+                    ArrayPool<byte>.Shared.Return(leased);
+                }
+            }
+        }
+    }
+
+    private static bool CanParseRevision(int revision, out bool useCommonHeaders)
+    {
+        switch ((SerializationRevision)revision)
+        {
+            case SerializationRevision.V1_Original: // we don't actively expect this much, since only in-proc back-end was shipped
+                useCommonHeaders = false;
+                return true;
+            case SerializationRevision.V2_OriginalWithCommonHeaders:
+                useCommonHeaders = true;
+                return true;
+            default:
+                // In future versions, also support the previous revision format.
+                useCommonHeaders = default;
+                return false;
+        }
+    }
+
+    private static OutputCacheEntry? Deserialize(ReadOnlyMemory<byte> content)
+    {
+        var reader = new FormatterBinaryReader(content);
 
         // Serialization revision:
         //   7-bit encoded int
 
-        var revision = reader.Read7BitEncodedInt();
-
-        if (revision != SerializationRevision)
+        if (!CanParseRevision(reader.Read7BitEncodedInt(), out var useCommonHeaders))
         {
-            // In future versions, also support the previous revision format.
-
             return null;
         }
-
-        var result = new FormatterEntry();
 
         // Creation date:
         //   Ticks: 7-bit encoded long
@@ -243,12 +261,14 @@ internal static class OutputCacheEntryFormatter
         var ticks = reader.Read7BitEncodedInt64();
         var offsetMinutes = reader.Read7BitEncodedInt64();
 
-        result.Created = new DateTimeOffset(ticks, TimeSpan.FromMinutes(offsetMinutes));
+        var created = new DateTimeOffset(ticks, TimeSpan.FromMinutes(offsetMinutes));
 
         // Status code:
         //   7-bit encoded int
 
-        result.StatusCode = reader.Read7BitEncodedInt();
+        var statusCode = reader.Read7BitEncodedInt();
+
+        var result = new OutputCacheEntry(created, statusCode);
 
         // Headers:
         //   Headers count: 7-bit encoded int
@@ -259,27 +279,41 @@ internal static class OutputCacheEntryFormatter
         //     key name byte length: 7-bit encoded int
         //     UTF-8 encoded key name byte[]
         //     Values count: 7-bit encoded int
-
-        result.Headers = new Dictionary<string, string?[]>(headersCount);
-
-        for (var i = 0; i < headersCount; i++)
+        if (headersCount > 0)
         {
-            var key = reader.ReadString();
+            var headerArr = ArrayPool<(string Name, StringValues Values)>.Shared.Rent(headersCount);
 
-            var valuesCount = reader.Read7BitEncodedInt();
-
-            //     For each header value:
-            //       data byte length: 7-bit encoded int
-            //       UTF-8 encoded byte[]
-
-            var values = new string[valuesCount];
-
-            for (var j = 0; j < valuesCount; j++)
+            for (var i = 0; i < headersCount; i++)
             {
-                values[j] = reader.ReadString();
-            }
+                var key = useCommonHeaders ? ReadCommonHeader(ref reader) : reader.ReadString();
+                StringValues value;
+                var valuesCount = reader.Read7BitEncodedInt();
+                //     For each header value:
+                //       data byte length: 7-bit encoded int
+                //       UTF-8 encoded byte[]
+                switch (valuesCount)
+                {
+                    case < 0:
+                        throw new InvalidOperationException();
+                    case 0:
+                        value = StringValues.Empty;
+                        break;
+                    case 1:
+                        value = new(useCommonHeaders ? ReadCommonHeader(ref reader) : reader.ReadString());
+                        break;
+                    default:
+                        var values = new string[valuesCount];
 
-            result.Headers[key] = values;
+                        for (var j = 0; j < valuesCount; j++)
+                        {
+                            values[j] = useCommonHeaders ? ReadCommonHeader(ref reader) : reader.ReadString();
+                        }
+                        value = new(values);
+                        break;
+                }
+                headerArr[i] = (key, value);
+            }
+            result.Headers = new ReadOnlyMemory<(string Name, StringValues Values)>(headerArr, 0, headersCount);
         }
 
         // Body:
@@ -291,39 +325,90 @@ internal static class OutputCacheEntryFormatter
         //     data byte length: 7-bit encoded int
         //     data byte[]
 
-        var segments = new List<byte[]>(segmentsCount);
-
-        for (var i = 0; i < segmentsCount; i++)
+        switch (segmentsCount)
         {
-            var segmentLength = reader.Read7BitEncodedInt();
-            var segment = reader.ReadBytes(segmentLength);
-
-            segments.Add(segment);
+            case 0:
+                // nothing to do
+                break;
+            case 1:
+                result.Body = new ReadOnlySequence<byte>(ReadSegment(ref reader));
+                break;
+            case < 0:
+                throw new InvalidOperationException();
+            default:
+                RecyclingReadOnlySequenceSegment first = RecyclingReadOnlySequenceSegment.Create(ReadSegment(ref reader), null), last = first;
+                for (int i = 1; i < segmentsCount; i++)
+                {
+                    last = RecyclingReadOnlySequenceSegment.Create(ReadSegment(ref reader), last);
+                }
+                result.Body = new ReadOnlySequence<byte>(first, 0, last, last.Length);
+                break;
         }
 
-        result.Body = segments;
+        static ReadOnlyMemory<byte> ReadSegment(ref FormatterBinaryReader reader)
+        {
+            var segmentLength = reader.Read7BitEncodedInt();
+            return reader.ReadBytesMemory(segmentLength);
+        }
 
         // Tags:
         //   Tags count: 7-bit encoded int
 
         var tagsCount = reader.Read7BitEncodedInt();
-
-        //   For each tag:
-        //     data byte length: 7-bit encoded int
-        //     UTF-8 encoded byte[]
-
-        var tags = new string[tagsCount];
-
-        for (var i = 0; i < tagsCount; i++)
+        if (tagsCount > 0)
         {
-            var tagLength = reader.Read7BitEncodedInt();
-            var tagData = reader.ReadBytes(tagLength);
-            var tag = Encoding.UTF8.GetString(tagData);
+            //   For each tag:
+            //     data byte length: 7-bit encoded int
+            //     UTF-8 encoded byte[]
+            var tagsArray = ArrayPool<string>.Shared.Rent(tagsCount);
 
-            tags[i] = tag;
+            for (var i = 0; i < tagsCount; i++)
+            {
+                tagsArray[i] = reader.ReadString();
+            }
+
+            result.Tags = new ReadOnlyMemory<string>(tagsArray, 0, tagsCount);
         }
-
-        result.Tags = tags;
         return result;
+    }
+
+    private static string ReadCommonHeader(ref FormatterBinaryReader reader)
+    {
+        int preamble = reader.Read7BitEncodedInt();
+        // LSB means "using common header/value"
+        if ((preamble & 1) == 1)
+        {
+            // non-LSB is the index of the common header
+            return CommonHeaders[preamble >> 1];
+        }
+        else
+        {
+            // non-LSB is the string length
+            return reader.ReadString(preamble >> 1);
+        }
+    }
+
+    static readonly string[] CommonHeaders = new string[]
+    {
+        // to remove values, use ""; DO NOT just remove the line
+        ""
+
+    };
+
+    static readonly FrozenDictionary<string, int> CommonHeadersLookup = BuildCommonHeadersLookup();
+
+    static FrozenDictionary<string, int> BuildCommonHeadersLookup()
+    {
+        var arr = CommonHeaders;
+        var pairs = new List<KeyValuePair<string, int>>(arr.Length);
+        for (int i = 0; i < arr.Length; i++)
+        {
+            var header = arr[i];
+            if (!string.IsNullOrWhiteSpace(header)) // omit null/empty values
+            {
+                pairs.Add(new(header, i));
+            }
+        }
+        return FrozenDictionary.ToFrozenDictionary(pairs, StringComparer.Ordinal);
     }
 }
