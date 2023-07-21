@@ -45,6 +45,7 @@ internal static class OutputCacheEntryFormatter
 
         var buffer = new RecyclableArrayBufferWriter<byte>();
         Serialize(buffer, value);
+
         try
         {
             if (store is IOutputCacheBufferStore bufferStore)
