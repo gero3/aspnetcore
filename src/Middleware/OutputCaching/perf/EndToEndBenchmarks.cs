@@ -6,6 +6,7 @@ using System.IO.Pipelines;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Net.Http.Headers;
 
 namespace Microsoft.AspNetCore.OutputCaching.Benchmark;
@@ -23,7 +24,7 @@ public class EndToEndBenchmarks
     private static readonly OutputCacheOptions _options = new();
     private static readonly Action _noop = () => { };
 
-    private static readonly string[] _tags = Array.Empty<string>();
+    private static readonly HashSet<string> _tags = new();
     private static IHeaderDictionary _headers = null!;
 
     private ReadOnlyMemory<byte> Payload => new(_payloadOversized, 0, PayloadLength);
@@ -131,10 +132,9 @@ public class EndToEndBenchmarks
             body = oc.GetCachedResponseBody();
         }
         var entry = new OutputCacheEntry(DateTimeOffset.UtcNow, StatusCodes.Status200OK)
-            .CopyTagsFrom(_tags)
             .CopyHeadersFrom(_headers);
         entry.SetBody(body, recycleBuffers: true);
-        await OutputCacheEntryFormatter.StoreAsync(Key, entry, _options.DefaultExpirationTimeSpan, _store, CancellationToken.None);
+        await OutputCacheEntryFormatter.StoreAsync(Key, entry, _tags, _options.DefaultExpirationTimeSpan, _store, NullLogger.Instance, CancellationToken.None);
         entry.Dispose();
     }
 
@@ -148,10 +148,9 @@ public class EndToEndBenchmarks
             body = oc.GetCachedResponseBody();
         }
         var entry = new OutputCacheEntry(DateTimeOffset.UtcNow, StatusCodes.Status200OK)
-            .CopyTagsFrom(_tags)
             .CopyHeadersFrom(_headers);
         entry.SetBody(body, recycleBuffers: true);
-        await OutputCacheEntryFormatter.StoreAsync(Key, entry, _options.DefaultExpirationTimeSpan, _store, CancellationToken.None);
+        await OutputCacheEntryFormatter.StoreAsync(Key, entry, _tags, _options.DefaultExpirationTimeSpan, _store, NullLogger.Instance, CancellationToken.None);
         entry.Dispose();
     }
 
@@ -166,10 +165,9 @@ public class EndToEndBenchmarks
             body = oc.GetCachedResponseBody();
         }
         var entry = new OutputCacheEntry(DateTimeOffset.UtcNow, StatusCodes.Status200OK)
-            .CopyTagsFrom(_tags)
             .CopyHeadersFrom(_headers);
         entry.SetBody(body, recycleBuffers: true);
-        await OutputCacheEntryFormatter.StoreAsync(Key, entry, _options.DefaultExpirationTimeSpan, _store, CancellationToken.None);
+        await OutputCacheEntryFormatter.StoreAsync(Key, entry, _tags, _options.DefaultExpirationTimeSpan, _store, NullLogger.Instance, CancellationToken.None);
         entry.Dispose();
     }
 
@@ -184,10 +182,9 @@ public class EndToEndBenchmarks
             body = oc.GetCachedResponseBody();
         }
         var entry = new OutputCacheEntry(DateTimeOffset.UtcNow, StatusCodes.Status200OK)
-            .CopyTagsFrom(_tags)
             .CopyHeadersFrom(_headers);
         entry.SetBody(body, recycleBuffers: true);
-        await OutputCacheEntryFormatter.StoreAsync(Key, entry, _options.DefaultExpirationTimeSpan, _store, CancellationToken.None);
+        await OutputCacheEntryFormatter.StoreAsync(Key, entry, _tags, _options.DefaultExpirationTimeSpan, _store, NullLogger.Instance, CancellationToken.None);
         entry.Dispose();
     }
 
@@ -202,10 +199,9 @@ public class EndToEndBenchmarks
             body = oc.GetCachedResponseBody();
         }
         var entry = new OutputCacheEntry(DateTimeOffset.UtcNow, StatusCodes.Status200OK)
-            .CopyTagsFrom(_tags)
             .CopyHeadersFrom(_headers);
         entry.SetBody(body, recycleBuffers: true);
-        await OutputCacheEntryFormatter.StoreAsync(Key, entry, _options.DefaultExpirationTimeSpan, _store, CancellationToken.None);
+        await OutputCacheEntryFormatter.StoreAsync(Key, entry, _tags, _options.DefaultExpirationTimeSpan, _store, NullLogger.Instance, CancellationToken.None);
         entry.Dispose();
     }
 
@@ -220,10 +216,9 @@ public class EndToEndBenchmarks
             body = oc.GetCachedResponseBody();
         }
         var entry = new OutputCacheEntry(DateTimeOffset.UtcNow, StatusCodes.Status200OK)
-            .CopyTagsFrom(_tags)
             .CopyHeadersFrom(_headers);
         entry.SetBody(body, recycleBuffers: true);
-        await OutputCacheEntryFormatter.StoreAsync(Key, entry, _options.DefaultExpirationTimeSpan, _store, CancellationToken.None);
+        await OutputCacheEntryFormatter.StoreAsync(Key, entry, _tags, _options.DefaultExpirationTimeSpan, _store, NullLogger.Instance, CancellationToken.None);
         entry.Dispose();
     }
 
