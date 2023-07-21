@@ -520,7 +520,8 @@ internal static class OutputCacheEntryFormatter
                 pairs.Add(new(header, i));
             }
         }
-        return FrozenDictionary.ToFrozenDictionary(pairs, StringComparer.Ordinal);
+
+        return FrozenDictionary.ToFrozenDictionary(pairs, StringComparer.OrdinalIgnoreCase);
     }
 
     internal static bool ShouldStoreHeader(string key) => !IgnoredHeaders.Contains(key);
