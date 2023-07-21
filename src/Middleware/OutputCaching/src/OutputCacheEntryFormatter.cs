@@ -463,6 +463,7 @@ internal static class OutputCacheEntryFormatter
         HeaderNames.ProxyConnection,
         HeaderNames.Range,
         HeaderNames.Referer,
+        HeaderNames.RequestId,
         HeaderNames.RetryAfter,
         HeaderNames.Server,
         HeaderNames.StrictTransportSecurity,
@@ -475,6 +476,15 @@ internal static class OutputCacheEntryFormatter
         HeaderNames.Vary,
         HeaderNames.Via,
         HeaderNames.Warning,
+        HeaderNames.XContentTypeOptions,
+        HeaderNames.XFrameOptions,
+        HeaderNames.XPoweredBy,
+        HeaderNames.XRequestedWith,
+        HeaderNames.XUACompatible,
+        HeaderNames.XXSSProtection,
+        // additional MSFT headers
+        "X-Rtag",
+        "X-Vhost",
 
         // for Content-Type
         "text/html",
@@ -501,7 +511,11 @@ internal static class OutputCacheEntryFormatter
         // if you add new options here, you should rev the api version
     };
 
-    static readonly FrozenDictionary<string, int> CommonHeadersLookup = BuildCommonHeadersLookup();
+    private static readonly FrozenSet<string> IgnoredHeaders = FrozenSet.ToFrozenSet(new[] {
+            HeaderNames.RequestId, HeaderNames.ContentLength, HeaderNames.Age
+    }, StringComparer.OrdinalIgnoreCase);
+
+    private static readonly FrozenDictionary<string, int> CommonHeadersLookup = BuildCommonHeadersLookup();
 
     static FrozenDictionary<string, int> BuildCommonHeadersLookup()
     {
@@ -517,4 +531,6 @@ internal static class OutputCacheEntryFormatter
         }
         return FrozenDictionary.ToFrozenDictionary(pairs, StringComparer.Ordinal);
     }
+
+    internal static bool ShouldStoreHeader(string key) => !IgnoredHeaders.Contains(key);
 }
