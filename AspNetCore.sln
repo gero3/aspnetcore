@@ -1772,8 +1772,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MinimalFormSample", "src\An
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MvcFormSample", "src\Mvc\samples\MvcFormSample\MvcFormSample.csproj", "{055F86AA-FB37-40CC-B39E-C29CE7547BB7}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Microsoft.AspNetCore.OutputCaching.Microbenchmarks", "src\Middleware\OutputCaching\perf\Microsoft.AspNetCore.OutputCaching.Microbenchmarks.csproj", "{2DAFAEFA-659C-4145-8D16-6292E076105F}"
-EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Microsoft.AspNetCore.OutputCaching.Microbenchmarks", "src\Middleware\OutputCaching\perf\Microbenchmarks\Microsoft.AspNetCore.OutputCaching.Microbenchmarks.csproj", "{137AD17B-066F-4ED4-80FA-8D21C7B76CA6}"
 EndProject
 Global
