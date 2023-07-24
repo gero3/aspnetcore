@@ -21,7 +21,7 @@ using StackExchange.Redis;
 
 namespace Microsoft.Extensions.Caching.StackExchangeRedis;
 
-internal class RedisOutputCacheStore : IOutputCacheStore, IOutputCacheBufferStore, IDisposable
+internal partial class RedisOutputCacheStore : IOutputCacheStore, IOutputCacheBufferStore, IDisposable
 {
     private readonly RedisCacheOptions _options;
     private readonly ILogger _logger;
